@@ -1,0 +1,132 @@
+
+@{
+    Layout = null;
+    ViewData["Title"] = "Student Dashboard";
+}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Student Dashboard</title>
+    <link rel="stylesheet" href="/digital-twin/css/style.css" />
+</head>
+<body>
+    <div class="app">
+        <aside class="side">
+            <h2>Student Digital Twin</h2>
+            <nav>
+                <a href="/StudentPages/Dashboard">Dashboard</a>
+                <a href="/StudentPages/Profile">My Profile</a>
+                <a href="/StudentPages/Progress">Academic Progress</a>
+                <a href="/StudentPages/Ask">Ask AI</a>
+                <a href="/StudentPages/Upload">Upload Certificate</a>
+                <a href="/StudentPages/Notifications">Notifications</a>
+            </nav>
+        </aside>
+
+        <main class="main">
+            <div class="top">
+                <div>
+                    <h1 id="studentName">Loading...</h1>
+                    <p class="sub">Your academic journey at a glance.</p>
+                </div>
+            </div>
+
+            <div id="errorMessage" style="color:red;"></div>
+
+            <div class="grid">
+                <div class="card">
+                    <h3>Current GPA</h3>
+                    <h2 id="gpa">--</h2>
+                    <p>Academic performance</p>
+                </div>
+
+                <div class="card">
+                    <h3>Attendance</h3>
+                    <h2 id="attendance">--</h2>
+                    <p>Attendance rate</p>
+                </div>
+
+                <div class="card">
+                    <h3>Target Career</h3>
+                    <h2 id="targetGoal">--</h2>
+                    <p>Your career goal</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Academic Profile</h2>
+                <p id="email"></p>
+                <p id="interests"></p>
+            </div>
+
+            <div class="card">
+                <h2>My Courses</h2>
+                <div id="courses">Loading...</div>
+            </div>
+
+            <div class="card">
+                <h2>My Skills</h2>
+                <div id="skills">Loading...</div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        async function loadDashboard() {
+            const errorBox = document.getElementById('errorMessage');
+
+            try {
+                const response = await fetch('/api/student/1/profile');
+
+                if (!response.ok) {
+                    throw new Error('API error: ' + response.status);
+                }
+
+                const student = await response.json();
+
+                document.getElementById('studentName').textContent =
+                    'Welcome, ' + student.fullName;
+
+                document.getElementById('gpa').textContent = student.gpa;
+                document.getElementById('attendance').textContent =
+                    student.attendanceRate + '%';
+
+                document.getElementById('targetGoal').textContent =
+                    student.targetGoal;
+
+                document.getElementById('email').textContent =
+                    'Email: ' + student.email;
+
+                document.getElementById('interests').textContent =
+                    'Interests: ' + student.interests;
+
+                const courses = document.getElementById('courses');
+                courses.textContent = '';
+
+                student.courses.forEach(course => {
+                    const p = document.createElement('p');
+                    p.textContent = course.courseName + ' - Grade: ' + course.grade;
+                    courses.appendChild(p);
+                });
+
+                const skills = document.getElementById('skills');
+                skills.textContent = '';
+
+                student.skills.forEach(skill => {
+                    const p = document.createElement('p');
+                    p.textContent = skill.skillName + ' - Level: ' + skill.level;
+                    skills.appendChild(p);
+                });
+
+            } catch (error) {
+                errorBox.textContent = 'Error: ' + error.message;
+            }
+        }
+
+        loadDashboard();
+    </script>
+</body>
+</html>

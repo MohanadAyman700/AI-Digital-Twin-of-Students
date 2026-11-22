@@ -1,0 +1,74 @@
+
+@{
+    Layout = null;
+    ViewData["Title"] = "Student Dashboard";
+}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Student Dashboard - Digital Twin</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="~/digital-twin/css/style.css" />
+</head>
+<body>
+    <div class="app">
+
+        <aside class="side">
+            <h2>Student Digital Twin</h2>
+
+            <nav>
+                <a href="/StudentPages/Dashboard">Dashboard</a>
+                <a href="/StudentPages/Profile">My Profile</a>
+                <a href="/StudentPages/Progress">Academic Progress</a>
+                <a href="/StudentPages/Ask">Ask AI</a>
+                <a href="/StudentPages/Upload">Upload Certificate</a>
+                <a href="/StudentPages/Notifications">Notifications</a>
+            </nav>
+        </aside>
+
+        <main class="main">
+            <div class="top">
+                <div>
+                    <h1>Welcome to Your Dashboard</h1>
+                    <p class="sub">Your academic journey at a glance.</p>
+                </div>
+            </div>
+
+            <div class="grid">
+                <div class="card">
+                    <h3>Current GPA</h3>
+                    <h2>--</h2>
+                    <p>Academic performance</p>
+                </div>
+
+                <div class="card">
+                    <h3>Attendance</h3>
+                    <h2>--</h2>
+                    <p>Attendance rate</p>
+                </div>
+
+                <div class="card">
+                    <h3>Academic Risk</h3>
+                    <h2>--</h2>
+                    <p>AI risk assessment</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>AI Recommendations</h2>
+                <p>Your personalized learning recommendations will appear here.</p>
+            </div>
+
+            <div class="card">
+                <h2>Academic Progress</h2>
+                <p>Your academic progress will appear here.</p>
+            </div>
+        </main>
+
+    </div>
+</body>
+</html>

@@ -25,6 +25,8 @@ namespace DigitalTwinMvc
             app.UseAuthorization();
 
             app.MapStaticAssets();
+            app.UseDefaultFiles();
+            app.UseStaticFiles();
             app.MapControllerRoute(
                 name: "default",
                 pattern: "{controller=Home}/{action=Index}/{id?}")

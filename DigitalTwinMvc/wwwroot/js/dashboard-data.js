@@ -118,5 +118,4 @@ const PROF = {
 
 const COURSE_URL = "";
 const COURSE_LINKS = {
-  // "Algorithms": "https://example.com/courses/algorithms",
 };

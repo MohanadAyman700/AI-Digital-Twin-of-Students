@@ -1,3 +1,4 @@
+
 using System.Diagnostics;
 using DigitalTwinMvc.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -22,7 +23,13 @@ namespace DigitalTwinMvc.Controllers
         {
             return View();
         }
+
         public IActionResult Dashboard()
+        {
+            return View();
+        }
+
+        public IActionResult AcademicProfile()
         {
             return View();
         }
@@ -30,7 +37,10 @@ namespace DigitalTwinMvc.Controllers
         [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
         public IActionResult Error()
         {
-            return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
+            return View(new ErrorViewModel
+            {
+                RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier
+            });
         }
     }
 }
