@@ -1,62 +1,62 @@
-﻿using DigitalTwinMvc.Models;
+﻿using DigitalTwinMvc.Data;
+using DigitalTwinMvc.Models;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace DigitalTwinMvc.Controllers
 {
-    // This controller contains all the functions available to an academic advisor.
+    // All the functions available to an academic advisor.
     // Base URL: /api/advisor
     [ApiController]
     [Route("api/advisor")]
     public class AdvisorController : ControllerBase
     {
+        private readonly AppDbContext _db;
+
+        public AdvisorController(AppDbContext db)
+        {
+            _db = db;
+        }
+
         // ------------------------------------------------------------
-        // Helper methods (used by the actions below)
+        // Helper methods
         // ------------------------------------------------------------
 
         // Returns the student ONLY if he belongs to this advisor.
-        // This prevents an advisor from seeing students assigned to someone else.
-        private Student? FindStudentOfAdvisor(int advisorId, int studentId)
+        private Task<Student?> FindStudentOfAdvisorAsync(int advisorId, int studentId)
         {
-            return DemoStore.Students.FirstOrDefault(
+            return _db.Students.AsNoTracking().FirstOrDefaultAsync(
                 s => s.Id == studentId && s.AdvisorId == advisorId);
         }
 
-        // Attendance rate as a percentage (0 - 100).
-        private double GetAttendanceRate(int studentId)
+        private async Task<double> GetAttendanceRateAsync(int studentId)
         {
-            var records = DemoStore.Attendance
-                .Where(a => a.StudentId == studentId)
-                .ToList();
+            var total = await _db.Attendance.CountAsync(a => a.StudentId == studentId);
+            if (total == 0) return 0;
 
-            // Avoid dividing by zero when there are no records.
-            if (records.Count == 0)
-                return 0;
-
-            int presentCount = records.Count(a => a.Present);
-            double rate = presentCount * 100.0 / records.Count;
-
-            return Math.Round(rate, 1);
+            var present = await _db.Attendance.CountAsync(a => a.StudentId == studentId && a.Present);
+            return Math.Round(present * 100.0 / total, 1);
         }
 
-        // Average of all the student's grades.
-        private double GetGpa(int studentId)
+        private async Task<double> GetGpaAsync(int studentId)
         {
-            var courses = DemoStore.Courses
+            var avg = await _db.Courses
                 .Where(c => c.StudentId == studentId)
-                .ToList();
+                .Select(c => (double?)c.Grade)
+                .AverageAsync();
 
-            if (courses.Count == 0)
-                return 0;
-
-            return Math.Round(courses.Average(c => c.Grade), 2);
+            return Math.Round(avg ?? 0, 2);
         }
 
-        // A course may have several predictions over time.
-        // This method keeps only the newest prediction for each course.
-        private List<Prediction> GetLatestPredictions(int studentId)
+        // Newest prediction for each course.
+        private async Task<List<Prediction>> GetLatestPredictionsAsync(int studentId)
         {
-            return DemoStore.Predictions
+            var all = await _db.Predictions
+                .AsNoTracking()
                 .Where(p => p.StudentId == studentId)
+                .ToListAsync();
+
+            return all
                 .OrderByDescending(p => p.CreatedAt)
                 .GroupBy(p => p.CourseCode)
                 .Select(g => g.First())
@@ -68,32 +68,27 @@ namespace DigitalTwinMvc.Controllers
         //    GET /api/advisor/1/at-risk-students
         // ============================================================
         [HttpGet("{advisorId:int}/at-risk-students")]
-        public IActionResult GetAtRiskStudents(int advisorId)
+        public async Task<IActionResult> GetAtRiskStudents(int advisorId)
         {
             var atRiskStudents = new List<object>();
 
-            // Only the students assigned to this advisor.
-            var myStudents = DemoStore.Students
+            var myStudents = await _db.Students
+                .AsNoTracking()
                 .Where(s => s.AdvisorId == advisorId)
-                .ToList();
+                .ToListAsync();
 
             foreach (var student in myStudents)
             {
-                // Newest prediction for each of the student's courses.
-                var predictions = GetLatestPredictions(student.Id);
+                var predictions = await GetLatestPredictionsAsync(student.Id);
 
-                // No predictions yet -> nothing to evaluate.
                 if (predictions.Count == 0)
                     continue;
 
-                // The student's overall risk = the highest risk among his courses.
                 var highestRisk = predictions.Max(p => p.Risk);
 
-                // Skip students who are not at risk.
                 if (highestRisk == RiskLevel.Low)
                     continue;
 
-                // Courses that are actually risky.
                 var riskyCourses = predictions
                     .Where(p => p.Risk != RiskLevel.Low)
                     .Select(p => p.CourseCode)
@@ -103,8 +98,8 @@ namespace DigitalTwinMvc.Controllers
                 {
                     StudentId = student.Id,
                     student.FullName,
-                    Gpa = GetGpa(student.Id),
-                    AttendanceRate = GetAttendanceRate(student.Id),
+                    Gpa = await GetGpaAsync(student.Id),
+                    AttendanceRate = await GetAttendanceRateAsync(student.Id),
                     Risk = highestRisk.ToString(),
                     RiskCourses = riskyCourses
                 });
@@ -118,19 +113,17 @@ namespace DigitalTwinMvc.Controllers
         //    GET /api/advisor/1/students/2/predictions
         // ============================================================
         [HttpGet("{advisorId:int}/students/{studentId:int}/predictions")]
-        public IActionResult ReviewPredictions(int advisorId, int studentId)
+        public async Task<IActionResult> ReviewPredictions(int advisorId, int studentId)
         {
-            // Step 1: the student must belong to this advisor.
-            var student = FindStudentOfAdvisor(advisorId, studentId);
+            var student = await FindStudentOfAdvisorAsync(advisorId, studentId);
             if (student == null)
                 return NotFound("Student not found for this advisor.");
 
-            // Step 2: return the newest predictions.
             return Ok(new
             {
                 StudentId = student.Id,
                 student.FullName,
-                Predictions = GetLatestPredictions(student.Id)
+                Predictions = await GetLatestPredictionsAsync(student.Id)
             });
         }
 
@@ -139,15 +132,13 @@ namespace DigitalTwinMvc.Controllers
         //    GET /api/advisor/1/students/2/progress
         // ============================================================
         [HttpGet("{advisorId:int}/students/{studentId:int}/progress")]
-        public IActionResult MonitorProgress(int advisorId, int studentId)
+        public async Task<IActionResult> MonitorProgress(int advisorId, int studentId)
         {
-            // Step 1: the student must belong to this advisor.
-            var student = FindStudentOfAdvisor(advisorId, studentId);
+            var student = await FindStudentOfAdvisorAsync(advisorId, studentId);
             if (student == null)
                 return NotFound("Student not found for this advisor.");
 
-            // Step 2: average grade for each semester.
-            var semesters = DemoStore.Courses
+            var semesters = await _db.Courses
                 .Where(c => c.StudentId == student.Id)
                 .GroupBy(c => c.Semester)
                 .OrderBy(g => g.Key)
@@ -156,45 +147,40 @@ namespace DigitalTwinMvc.Controllers
                     Semester = g.Key,
                     AverageGrade = Math.Round(g.Average(c => c.Grade), 2)
                 })
-                .ToList();
+                .ToListAsync();
 
-            // Step 3: return the progress summary.
             return Ok(new
             {
                 student.FullName,
-                Gpa = GetGpa(student.Id),
+                Gpa = await GetGpaAsync(student.Id),
                 Semesters = semesters,
-                SkillsCount = DemoStore.Skills.Count(k => k.StudentId == student.Id),
-                AttendanceRate = GetAttendanceRate(student.Id)
+                SkillsCount = await _db.Skills.CountAsync(k => k.StudentId == student.Id),
+                AttendanceRate = await GetAttendanceRateAsync(student.Id)
             });
         }
 
         // ============================================================
         // 4) Create Intervention Plans
         //    POST /api/advisor/intervention-plans
-        //    Body example:
         //    { "advisorId": 1, "studentId": 2, "title": "Extra tutoring",
         //      "actions": "Weekly session + exercises", "dueDate": "2026-12-31" }
         // ============================================================
         [HttpPost("intervention-plans")]
-        public IActionResult CreateInterventionPlan([FromBody] CreatePlanRequest request)
+        public async Task<IActionResult> CreateInterventionPlan([FromBody] CreatePlanRequest request)
         {
-            // Step 1: the student must belong to this advisor.
-            var student = FindStudentOfAdvisor(request.AdvisorId, request.StudentId);
+            var student = await FindStudentOfAdvisorAsync(request.AdvisorId, request.StudentId);
             if (student == null)
                 return NotFound("Student not found for this advisor.");
 
-            // Step 2: title and actions cannot be empty.
             if (string.IsNullOrWhiteSpace(request.Title) ||
                 string.IsNullOrWhiteSpace(request.Actions))
             {
                 return BadRequest("Title and Actions are required.");
             }
 
-            // Step 3: create the plan and save it.
+            // Id is generated by the database (IDENTITY column).
             var plan = new InterventionPlan
             {
-                Id = DemoStore.Plans.Count + 1,   // simple auto-increment id
                 StudentId = student.Id,
                 AdvisorId = request.AdvisorId,
                 Title = request.Title,
@@ -202,7 +188,8 @@ namespace DigitalTwinMvc.Controllers
                 DueDate = request.DueDate
             };
 
-            DemoStore.Plans.Add(plan);
+            _db.Plans.Add(plan);
+            await _db.SaveChangesAsync();
 
             return Ok(plan);
         }
@@ -212,11 +199,12 @@ namespace DigitalTwinMvc.Controllers
         //    GET /api/advisor/1/students/2/intervention-plans
         // ============================================================
         [HttpGet("{advisorId:int}/students/{studentId:int}/intervention-plans")]
-        public IActionResult GetInterventionPlans(int advisorId, int studentId)
+        public async Task<IActionResult> GetInterventionPlans(int advisorId, int studentId)
         {
-            var plans = DemoStore.Plans
+            var plans = await _db.Plans
+                .AsNoTracking()
                 .Where(p => p.AdvisorId == advisorId && p.StudentId == studentId)
-                .ToList();
+                .ToListAsync();
 
             return Ok(plans);
         }
@@ -224,31 +212,27 @@ namespace DigitalTwinMvc.Controllers
         // ============================================================
         // 5) Send Personalized Guidance
         //    POST /api/advisor/guidance
-        //    Body example:
         //    { "advisorId": 1, "studentId": 2, "message": "Please attend the lab sessions." }
         // ============================================================
         [HttpPost("guidance")]
-        public IActionResult SendGuidance([FromBody] SendGuidanceRequest request)
+        public async Task<IActionResult> SendGuidance([FromBody] SendGuidanceRequest request)
         {
-            // Step 1: the student must belong to this advisor.
-            var student = FindStudentOfAdvisor(request.AdvisorId, request.StudentId);
+            var student = await FindStudentOfAdvisorAsync(request.AdvisorId, request.StudentId);
             if (student == null)
                 return NotFound("Student not found for this advisor.");
 
-            // Step 2: the message cannot be empty.
             if (string.IsNullOrWhiteSpace(request.Message))
                 return BadRequest("Message is required.");
 
-            // Step 3: create the message and save it.
             var message = new GuidanceMessage
             {
-                Id = DemoStore.Messages.Count + 1,   // simple auto-increment id
                 StudentId = student.Id,
                 AdvisorId = request.AdvisorId,
                 Message = request.Message
             };
 
-            DemoStore.Messages.Add(message);
+            _db.Messages.Add(message);
+            await _db.SaveChangesAsync();
 
             return Ok(message);
         }

@@ -2,6 +2,7 @@
 {
     public class CourseRecord
     {
+        public int Id { get; set; }
         public int StudentId { get; set; }
         public string CourseCode { get; set; } = "";
         public string CourseName { get; set; } = "";
