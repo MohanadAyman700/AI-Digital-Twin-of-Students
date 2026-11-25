@@ -2,6 +2,7 @@
 {
     public class Feedback
     {
+        public int Id { get; set; }
         public int RecommendationId { get; set; }
         public int StudentId { get; set; }
         public int Rating { get; set; }

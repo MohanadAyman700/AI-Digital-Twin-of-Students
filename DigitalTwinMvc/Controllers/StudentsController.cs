@@ -1,89 +1,84 @@
-﻿using DigitalTwinMvc.Models;
+﻿using DigitalTwinMvc.Data;
+using DigitalTwinMvc.Models;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace DigitalTwinMvc.Controllers
 {
-    // This controller contains all the functions available to a student.
+    // All the functions available to a student.
     // Base URL: /api/student
     [ApiController]
     [Route("api/student")]
     public class StudentsController : ControllerBase
     {
+        private readonly AppDbContext _db;
+
+        public StudentsController(AppDbContext db)
+        {
+            _db = db;
+        }
+
         // ------------------------------------------------------------
         // Helper class: describes one missing skill
         // ------------------------------------------------------------
         private class SkillGap
         {
             public string SkillName { get; set; } = "";
-            public int CurrentLevel { get; set; }    // what the student has now
-            public int RequiredLevel { get; set; }   // what the target goal needs
-            public int Gap { get; set; }             // RequiredLevel - CurrentLevel
+            public int CurrentLevel { get; set; }
+            public int RequiredLevel { get; set; }
+            public int Gap { get; set; }
         }
 
         // ------------------------------------------------------------
-        // Helper methods (used by the actions below)
+        // Helper methods
         // ------------------------------------------------------------
-
-        // Find a student by id. Returns null if the student does not exist.
-        private Student? FindStudent(int studentId)
+        private Task<Student?> FindStudentAsync(int studentId)
         {
-            return DemoStore.Students.FirstOrDefault(s => s.Id == studentId);
+            return _db.Students.AsNoTracking().FirstOrDefaultAsync(s => s.Id == studentId);
         }
 
         // Attendance rate as a percentage (0 - 100).
-        private double GetAttendanceRate(int studentId)
+        private async Task<double> GetAttendanceRateAsync(int studentId)
         {
-            var records = DemoStore.Attendance
-                .Where(a => a.StudentId == studentId)
-                .ToList();
+            var total = await _db.Attendance.CountAsync(a => a.StudentId == studentId);
+            if (total == 0) return 0;
 
-            // Avoid dividing by zero when there are no records.
-            if (records.Count == 0)
-                return 0;
-
-            int presentCount = records.Count(a => a.Present);
-            double rate = presentCount * 100.0 / records.Count;
-
-            return Math.Round(rate, 1);
+            var present = await _db.Attendance.CountAsync(a => a.StudentId == studentId && a.Present);
+            return Math.Round(present * 100.0 / total, 1);
         }
 
         // Average of all the student's grades.
-        private double GetGpa(int studentId)
+        private async Task<double> GetGpaAsync(int studentId)
         {
-            var courses = DemoStore.Courses
+            var avg = await _db.Courses
                 .Where(c => c.StudentId == studentId)
-                .ToList();
+                .Select(c => (double?)c.Grade)
+                .AverageAsync();
 
-            if (courses.Count == 0)
-                return 0;
-
-            return Math.Round(courses.Average(c => c.Grade), 2);
+            return Math.Round(avg ?? 0, 2);
         }
 
-        // Compare the student's skills with the skills required by his target goal.
-        // Gap = required level - current level (only gaps greater than 0 are returned).
-        private List<SkillGap> GetSkillGaps(Student student)
+        // Gap = required level - current level (only gaps > 0 are returned).
+        private async Task<List<SkillGap>> GetSkillGapsAsync(Student student)
         {
-            var gaps = new List<SkillGap>();
+            var requiredSkills = await _db.GoalSkills
+                .AsNoTracking()
+                .Where(g => g.Goal == student.TargetGoal)
+                .ToListAsync();
 
-            // Skills required for the student's target goal (e.g. "Data Scientist").
-            var requiredSkills = DemoStore.GoalSkills
-                .Where(g => g.Goal == student.TargetGoal);
+            var studentSkills = await _db.Skills
+                .AsNoTracking()
+                .Where(k => k.StudentId == student.Id)
+                .ToListAsync();
+
+            var gaps = new List<SkillGap>();
 
             foreach (var required in requiredSkills)
             {
-                // Does the student already have this skill?
-                var studentSkill = DemoStore.Skills.FirstOrDefault(
-                    k => k.StudentId == student.Id && k.SkillName == required.SkillName);
-
-                // If not, his level is 0.
-                int currentLevel = 0;
-                if (studentSkill != null)
-                    currentLevel = studentSkill.Level;
-
+                var studentSkill = studentSkills.FirstOrDefault(k => k.SkillName == required.SkillName);
+                int currentLevel = studentSkill?.Level ?? 0;
                 int gap = required.RequiredLevel - currentLevel;
 
-                // Only keep skills that are still missing.
                 if (gap > 0)
                 {
                     gaps.Add(new SkillGap
@@ -96,27 +91,22 @@ namespace DigitalTwinMvc.Controllers
                 }
             }
 
-            // Biggest gap first.
             return gaps.OrderByDescending(g => g.Gap).ToList();
         }
 
         // ============================================================
-        // 1) View Academic Profile
-        //    GET /api/student/1/profile
+        // 1) View Academic Profile      GET /api/student/1/profile
         // ============================================================
         [HttpGet("{studentId:int}/profile")]
-        public IActionResult GetProfile(int studentId)
+        public async Task<IActionResult> GetProfile(int studentId)
         {
-            // Step 1: make sure the student exists.
-            var student = FindStudent(studentId);
+            var student = await FindStudentAsync(studentId);
             if (student == null)
                 return NotFound("Student not found.");
 
-            // Step 2: collect the student's data.
-            var courses = DemoStore.Courses.Where(c => c.StudentId == studentId).ToList();
-            var skills = DemoStore.Skills.Where(k => k.StudentId == studentId).ToList();
+            var courses = await _db.Courses.AsNoTracking().Where(c => c.StudentId == studentId).ToListAsync();
+            var skills = await _db.Skills.AsNoTracking().Where(k => k.StudentId == studentId).ToListAsync();
 
-            // Step 3: return everything as JSON.
             return Ok(new
             {
                 student.Id,
@@ -124,27 +114,23 @@ namespace DigitalTwinMvc.Controllers
                 student.Email,
                 student.Interests,
                 student.TargetGoal,
-                Gpa = GetGpa(studentId),
-                AttendanceRate = GetAttendanceRate(studentId),
+                Gpa = await GetGpaAsync(studentId),
+                AttendanceRate = await GetAttendanceRateAsync(studentId),
                 Courses = courses,
                 Skills = skills
             });
         }
 
         // ============================================================
-        // 2) Track Learning Progress
-        //    GET /api/student/1/progress
+        // 2) Track Learning Progress    GET /api/student/1/progress
         // ============================================================
         [HttpGet("{studentId:int}/progress")]
-        public IActionResult GetProgress(int studentId)
+        public async Task<IActionResult> GetProgress(int studentId)
         {
-            // Step 1: make sure the student exists.
-            if (FindStudent(studentId) == null)
+            if (!await _db.Students.AnyAsync(s => s.Id == studentId))
                 return NotFound("Student not found.");
 
-            // Step 2: average grade for each semester
-            // (shows whether the student is improving or declining).
-            var semesters = DemoStore.Courses
+            var semesters = await _db.Courses
                 .Where(c => c.StudentId == studentId)
                 .GroupBy(c => c.Semester)
                 .OrderBy(g => g.Key)
@@ -153,14 +139,13 @@ namespace DigitalTwinMvc.Controllers
                     Semester = g.Key,
                     AverageGrade = Math.Round(g.Average(c => c.Grade), 2)
                 })
-                .ToList();
+                .ToListAsync();
 
-            // Step 3: return the progress summary.
             return Ok(new
             {
                 Semesters = semesters,
-                SkillsCount = DemoStore.Skills.Count(k => k.StudentId == studentId),
-                AttendanceRate = GetAttendanceRate(studentId)
+                SkillsCount = await _db.Skills.CountAsync(k => k.StudentId == studentId),
+                AttendanceRate = await GetAttendanceRateAsync(studentId)
             });
         }
 
@@ -169,16 +154,18 @@ namespace DigitalTwinMvc.Controllers
         //    GET /api/student/1/predictions
         // ============================================================
         [HttpGet("{studentId:int}/predictions")]
-        public IActionResult GetPredictions(int studentId)
+        public async Task<IActionResult> GetPredictions(int studentId)
         {
-            // Step 1: make sure the student exists.
-            if (FindStudent(studentId) == null)
+            if (!await _db.Students.AnyAsync(s => s.Id == studentId))
                 return NotFound("Student not found.");
 
-            // Step 2: a course may have several predictions over time,
-            // so we keep only the newest one for each course.
-            var predictions = DemoStore.Predictions
+            // Keep only the newest prediction for each course.
+            var all = await _db.Predictions
+                .AsNoTracking()
                 .Where(p => p.StudentId == studentId)
+                .ToListAsync();
+
+            var predictions = all
                 .OrderByDescending(p => p.CreatedAt)
                 .GroupBy(p => p.CourseCode)
                 .Select(g => g.First())
@@ -188,19 +175,16 @@ namespace DigitalTwinMvc.Controllers
         }
 
         // ============================================================
-        // 4) View Skill Gap Analysis
-        //    GET /api/student/1/skill-gaps
+        // 4) View Skill Gap Analysis    GET /api/student/1/skill-gaps
         // ============================================================
         [HttpGet("{studentId:int}/skill-gaps")]
-        public IActionResult GetSkillGapAnalysis(int studentId)
+        public async Task<IActionResult> GetSkillGapAnalysis(int studentId)
         {
-            // Step 1: make sure the student exists.
-            var student = FindStudent(studentId);
+            var student = await FindStudentAsync(studentId);
             if (student == null)
                 return NotFound("Student not found.");
 
-            // Step 2: calculate the missing skills.
-            var gaps = GetSkillGaps(student);
+            var gaps = await GetSkillGapsAsync(student);
 
             return Ok(new
             {
@@ -212,90 +196,81 @@ namespace DigitalTwinMvc.Controllers
         // ============================================================
         // 5) Provide Feedback on Recommendations
         //    POST /api/student/feedback
-        //    Body example:
         //    { "studentId": 1, "recommendationId": 1, "rating": 5, "comment": "Useful" }
         // ============================================================
         [HttpPost("feedback")]
-        public IActionResult ProvideFeedback([FromBody] FeedbackRequest request)
+        public async Task<IActionResult> ProvideFeedback([FromBody] FeedbackRequest request)
         {
-            // Step 1: rating must be between 1 and 5.
             if (request.Rating < 1 || request.Rating > 5)
                 return BadRequest("Rating must be between 1 and 5.");
 
-            // Step 2: the recommendation must belong to this student.
-            var recommendation = DemoStore.Recommendations.FirstOrDefault(
+            var recommendationExists = await _db.Recommendations.AnyAsync(
                 r => r.Id == request.RecommendationId && r.StudentId == request.StudentId);
 
-            if (recommendation == null)
+            if (!recommendationExists)
                 return NotFound("Recommendation not found.");
 
-            // Step 3: did the student already rate this recommendation?
-            var oldFeedback = DemoStore.Feedbacks.FirstOrDefault(
+            var oldFeedback = await _db.Feedbacks.FirstOrDefaultAsync(
                 f => f.RecommendationId == request.RecommendationId
                   && f.StudentId == request.StudentId);
 
             if (oldFeedback == null)
             {
-                // First time: add a new feedback.
-                var newFeedback = new Feedback
+                _db.Feedbacks.Add(new Feedback
                 {
                     RecommendationId = request.RecommendationId,
                     StudentId = request.StudentId,
                     Rating = request.Rating,
                     Comment = request.Comment
-                };
-                DemoStore.Feedbacks.Add(newFeedback);
+                });
             }
             else
             {
-                // Already rated: update the old feedback.
                 oldFeedback.Rating = request.Rating;
                 oldFeedback.Comment = request.Comment;
             }
+
+            await _db.SaveChangesAsync();
 
             return Ok(new { message = "Feedback saved." });
         }
 
         // ============================================================
-        // 6) View Learning Resources
-        //    GET /api/student/1/learning-resources
+        // 6) View Learning Resources    GET /api/student/1/learning-resources
         // ============================================================
         [HttpGet("{studentId:int}/learning-resources")]
-        public IActionResult GetLearningResources(int studentId)
+        public async Task<IActionResult> GetLearningResources(int studentId)
         {
-            // Step 1: make sure the student exists.
-            var student = FindStudent(studentId);
+            var student = await FindStudentAsync(studentId);
             if (student == null)
                 return NotFound("Student not found.");
 
-            // Step 2: get the names of the skills the student is missing.
-            var missingSkillNames = GetSkillGaps(student)
+            var missingSkillNames = (await GetSkillGapsAsync(student))
                 .Select(g => g.SkillName)
                 .ToList();
 
-            // Step 3: if nothing is missing, return all resources.
             if (missingSkillNames.Count == 0)
-                return Ok(DemoStore.Resources);
+                return Ok(await _db.Resources.AsNoTracking().ToListAsync());
 
-            // Otherwise return only the resources that teach the missing skills.
-            var resources = DemoStore.Resources
+            var resources = await _db.Resources
+                .AsNoTracking()
                 .Where(r => missingSkillNames.Contains(r.SkillName))
-                .ToList();
+                .ToListAsync();
 
             return Ok(resources);
         }
 
         // ============================================================
-        // Extra: the student reads the guidance sent by his advisor
-        //    GET /api/student/1/guidance
+        // Extra: guidance sent by the advisor   GET /api/student/1/guidance
         // ============================================================
         [HttpGet("{studentId:int}/guidance")]
-        public IActionResult GetGuidance(int studentId)
+        public async Task<IActionResult> GetGuidance(int studentId)
         {
-            var messages = DemoStore.Messages
+            var messages = await _db.Messages
+                .AsNoTracking()
                 .Where(m => m.StudentId == studentId)
-                .OrderByDescending(m => m.SentAt)   // newest first
-                .ToList();
+                .OrderByDescending(m => m.SentAt)
+                .ToListAsync();
 
             return Ok(messages);
         }
